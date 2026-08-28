@@ -1,11 +1,11 @@
-import { authHeaders, clearToken, getToken, login, setToken } from "./auth";
+import { authHeaders, clearToken, forceLogout, getToken, login, setToken } from "./auth";
 
 const TOKEN_KEY = "bff.access_token";
 
 beforeEach(() => {
+  vi.unstubAllGlobals(); // drop any fake localStorage/location a test installed
   localStorage.clear();
   clearToken(); // reset the in-memory cache too
-  vi.unstubAllGlobals();
 });
 
 describe("token cache", () => {
@@ -22,6 +22,55 @@ describe("token cache", () => {
     expect(getToken()).toBeNull();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(authHeaders()).toEqual({});
+  });
+
+  it("setToken still updates memory when localStorage.setItem throws", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+
+    expect(() => setToken("mem-only")).not.toThrow();
+    expect(getToken()).toBe("mem-only");
+  });
+
+  it("clearToken still clears memory when localStorage.removeItem throws", () => {
+    setToken("abc123");
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("storage disabled");
+    });
+
+    expect(() => clearToken()).not.toThrow();
+    expect(getToken()).toBeNull();
+  });
+});
+
+describe("readToken (module load)", () => {
+  it("returns null instead of throwing when localStorage access is blocked", async () => {
+    vi.resetModules();
+    const getItem = vi.fn(() => {
+      throw new Error("access denied"); // e.g. Safari private mode / disabled storage
+    });
+    vi.stubGlobal("localStorage", { getItem, setItem: vi.fn(), removeItem: vi.fn() });
+
+    const fresh = await import("./auth");
+
+    expect(getItem).toHaveBeenCalledWith(TOKEN_KEY);
+    expect(fresh.getToken()).toBeNull();
+
+    vi.resetModules(); // let the other files keep the real module
+  });
+});
+
+describe("forceLogout", () => {
+  it("clears the token and reloads the page", () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+    setToken("abc123");
+
+    forceLogout();
+
+    expect(getToken()).toBeNull();
+    expect(reload).toHaveBeenCalledOnce();
   });
 });
 

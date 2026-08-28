@@ -12,7 +12,6 @@ permissions:
 
 jobs:
   coverage:
-    name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,8 +22,7 @@ jobs:
       # Fails the job (and therefore the required "test / coverage" check the
       # branch ruleset gates on) when coverage drops below the thresholds in
       # vitest.config.ts.
-      - name: Run tests with coverage
-        run: npm run test:coverage
+      - run: npm run test:coverage
 
       # Publish the numbers back to the PR: a summary table on the run and a
       # sticky comment. Runs even when the step above failed so a regression is
