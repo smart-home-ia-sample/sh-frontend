@@ -11,28 +11,23 @@ on:
 
 jobs:
   analyze:
-    name: analyze
     runs-on: ubuntu-latest
     permissions:
       security-events: write
       actions: read
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
-
     steps:
       - uses: actions/checkout@v4
 
+      # Single language today; to add more, switch to a matrix and put the
+      # value back in `languages:` / `category:`.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ${{ matrix.language }}
-          # pure TS/JS app (Vite) — no compilation step for CodeQL to trace
-          build-mode: none
+          languages: javascript-typescript
+          build-mode: none # pure TS/JS app (Vite), nothing to compile
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:${{ matrix.language }}"
+          category: "/language:javascript-typescript"
