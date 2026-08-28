@@ -1,4 +1,5 @@
-import { fetchHomeStatusSnapshot, sendDeviceCommand } from "./orchestratorClient";
+import { fetchHomeStatusSnapshot, sendDeviceCommand, subscribeHomeStatus } from "./orchestratorClient";
+import type { HomeStatus } from "./orchestratorClient";
 import { forceLogout } from "./auth";
 
 vi.mock("./auth", () => ({
@@ -95,5 +96,120 @@ describe("fetchHomeStatusSnapshot", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, { ok: false, status: 500 })));
 
     await expect(fetchHomeStatusSnapshot()).rejects.toThrow("home-status request failed: 500");
+  });
+});
+
+/** A fake `fetch` Response whose body streams the given SSE text chunks. */
+function sseResponse(chunks: string[], init: { ok?: boolean; status?: number } = {}) {
+  const encoder = new TextEncoder();
+  let i = 0;
+  return {
+    ok: init.ok ?? true,
+    status: init.status ?? 200,
+    body: {
+      getReader: () => ({
+        read: async () =>
+          i < chunks.length
+            ? { done: false, value: encoder.encode(chunks[i++]) }
+            : { done: true, value: undefined },
+      }),
+    },
+  };
+}
+
+function frame(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+const SNAPSHOT: HomeStatus = {
+  simulatorOnline: true,
+  rooms: [
+    {
+      slug: "kitchen",
+      name: "Cozinha",
+      devices: [{ deviceId: "d1", nickname: "Luz", type: "light", state: { on: false } }],
+    },
+  ],
+  rollups: { alarmArmed: false, allDoorsLocked: true, openDoors: 0, totalWatts: 0, activeDevices: 0 },
+  events: [],
+};
+
+describe("subscribeHomeStatus", () => {
+  it("emits the snapshot, then merges device and simulator frames", async () => {
+    const onStatus = vi.fn();
+    const onError = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          frame("snapshot", SNAPSHOT),
+          frame("device", {
+            deviceId: "d1",
+            nickname: "Luz",
+            type: "light",
+            roomSlug: "kitchen",
+            state: { on: true },
+            at: 1000,
+            rollups: { ...SNAPSHOT.rollups, activeDevices: 1 },
+          }),
+          frame("simulator", { simulatorOnline: false }),
+        ]),
+      ),
+    );
+
+    subscribeHomeStatus(onStatus, onError);
+
+    await vi.waitFor(() => expect(onStatus).toHaveBeenCalledTimes(3));
+    expect(onError).not.toHaveBeenCalled();
+
+    const last = onStatus.mock.calls[2][0] as HomeStatus;
+    expect(last.rooms[0].devices[0].state).toEqual({ on: true });
+    expect(last.rollups.activeDevices).toBe(1);
+    expect(last.events[0]).toMatchObject({ deviceId: "d1", state: { on: true }, at: 1000 });
+    expect(last.simulatorOnline).toBe(false);
+  });
+
+  it("ignores a device frame that arrives before any snapshot", async () => {
+    const onStatus = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(sseResponse([frame("device", { deviceId: "d1", state: {} })])),
+    );
+
+    subscribeHomeStatus(onStatus, vi.fn());
+    // give the stream a chance to be consumed
+    await new Promise((r) => setTimeout(r, 10));
+    expect(onStatus).not.toHaveBeenCalled();
+  });
+
+  it("reports a non-OK stream via onError", async () => {
+    const onError = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, body: null }));
+
+    subscribeHomeStatus(vi.fn(), onError);
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+  });
+
+  it("logs out and stays silent on 401", async () => {
+    const onError = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, body: null }));
+
+    subscribeHomeStatus(vi.fn(), onError);
+
+    await vi.waitFor(() => expect(forceLogoutMock).toHaveBeenCalled());
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("returns an unsubscribe function that aborts without erroring", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse([frame("snapshot", SNAPSHOT)])));
+    const onError = vi.fn();
+
+    const unsubscribe = subscribeHomeStatus(vi.fn(), onError);
+    expect(typeof unsubscribe).toBe("function");
+    unsubscribe();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(onError).not.toHaveBeenCalled();
   });
 });

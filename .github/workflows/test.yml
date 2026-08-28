@@ -1,0 +1,45 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  # the coverage-report action posts / updates a sticky PR comment
+  pull-requests: write
+
+jobs:
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm }
+      - run: npm ci
+
+      # Fails the job (and therefore the required "test / coverage" check the
+      # branch ruleset gates on) when coverage drops below the thresholds in
+      # vitest.config.ts.
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      # Publish the numbers back to the PR: a summary table on the run and a
+      # sticky comment. Runs even when the step above failed so a regression is
+      # visible, not just red.
+      - name: Report coverage
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          json-summary-path: ./coverage/coverage-summary.json
+          json-final-path: ./coverage/coverage-final.json
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
