@@ -7,67 +7,7 @@ import {
   type HomeStatus,
   type RoomStatus,
 } from "../lib/orchestratorClient";
-
-const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-
-function num(state: Record<string, unknown> | null | undefined, key: string): number | undefined {
-  const v = state?.[key];
-  return typeof v === "number" ? v : undefined;
-}
-
-function bool(state: Record<string, unknown> | null | undefined, key: string): boolean {
-  return state?.[key] === true;
-}
-
-function deviceLabel(type: string, state: Record<string, unknown> | null): { text: string; on: boolean } {
-  if (!state) return { text: "—", on: false };
-  switch (type) {
-    case "light":
-      return bool(state, "on") ? { text: "Ligada", on: true } : { text: "Desligada", on: false };
-    case "dimmable_light": {
-      const b = num(state, "brightness");
-      return bool(state, "on")
-        ? { text: b !== undefined ? `Ligada (${b}%)` : "Ligada", on: true }
-        : { text: "Desligada", on: false };
-    }
-    case "ac": {
-      const t = num(state, "temperature");
-      return bool(state, "on")
-        ? { text: t !== undefined ? `Ligado (${t}°C)` : "Ligado", on: true }
-        : { text: "Desligado", on: false };
-    }
-    case "curtain":
-    case "window":
-      return bool(state, "open") ? { text: "Aberta", on: true } : { text: "Fechada", on: false };
-    case "door": {
-      const locked = bool(state, "locked");
-      const open = bool(state, "open");
-      return { text: `${locked ? "Trancada" : "Destrancada"}${open ? " · aberta" : ""}`, on: !locked };
-    }
-    case "motion_sensor":
-      return bool(state, "active")
-        ? { text: "Presença", on: true }
-        : { text: "Sem presença", on: false };
-    case "alarm":
-      return bool(state, "armed") ? { text: "Armado", on: true } : { text: "Desarmado", on: false };
-    default:
-      return bool(state, "on") ? { text: "Ligado", on: true } : { text: "Desligado", on: false };
-  }
-}
-
-const TYPE_ICON: Record<string, string> = {
-  light: "💡",
-  dimmable_light: "💡",
-  ac: "❄️",
-  curtain: "🪟",
-  window: "🪟",
-  door: "🚪",
-  tv: "📺",
-  coffee_maker: "☕",
-  refrigerator: "🧊",
-  motion_sensor: "🚶",
-  alarm: "🔔",
-};
+import { bool, clamp, deviceLabel, num, TYPE_ICON } from "../lib/deviceLabel";
 
 type Cmd = (action: string, value?: number) => void;
 
